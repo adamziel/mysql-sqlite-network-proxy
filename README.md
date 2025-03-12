@@ -6,7 +6,7 @@ even if they came from a plugin that started its own MySQL connection.
 ## How it works
 
 * JavaScript runs a `mysql2` server on port 3306 and listens for queries
-* JavaScript also runs a long-running WordPress process with the `sqlite-database-integration`
+* JavaScript also runs a long-running WordPress process with the [sqlite-database-integration](https://github.com/WordPress/sqlite-database-integration)
   plugin enabled
 * PHP suspends itself and waits for a MySQL query via a `post_message_to_js` call
 * On incoming MySQL query PHP runtime is resumed. It translates and runs the query via `$wpdb`
