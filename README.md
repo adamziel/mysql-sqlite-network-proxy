@@ -38,6 +38,6 @@ php client.php
 
 ## Limitations
 
-– It's node.js only for now. We'd need to fork `mysql2` and build an isomorphic server class.
-– We only reply with a resultset (for SELECT) or an OK packet (for other queries). Error packets are not yet implemented. Nuances of the query-specific expected response format are not yet implemented, too.
-- `mysql` CLI client is unable to connect to the proxy server due to `mysql2` library limitations.
+* It's node.js only for now. We'd need to fork `mysql2` and build an isomorphic server class.
+* We only reply with a resultset (for SELECT) or an OK packet (for other queries). Error packets are not yet implemented. Nuances of the query-specific expected response format are not yet implemented, too.
+* `mysql` CLI client is unable to connect to the proxy server due to `mysql2` library limitations.
