@@ -17,21 +17,22 @@ even if they came from a plugin that started its own MySQL connection.
 
 Install all dependencies:
 
-```ts
+```bash
 npm install
 ```
 
 Run the MySQL <-> SQLite proxy server
 
-```ts
+```bash
 bun mysql-server.ts 
+
 # Or, if you want to store the database file in a local directory:
 bun mysql-server.ts /path/to/empty/directory
 ```
 
 Finally, run the MySQL client:
 
-```ts
+```bash
 php client.php
 ```
 
