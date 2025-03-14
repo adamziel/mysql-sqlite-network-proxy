@@ -1,4 +1,8 @@
 <?php
+/**
+ * A MySQL proxy that always responds with the same, fixed data. It's a simple usage
+ * example of the MySQLSocketServer class.
+ */
 
 require_once __DIR__ . '/mysql-server.php';
 

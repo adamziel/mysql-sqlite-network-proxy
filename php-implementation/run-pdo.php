@@ -1,6 +1,6 @@
 <?php
 /**
- * A Naive SQLite gateway that just passes all the MySQL queries to the SQLite database.
+ * A naive MySQL<->SQLite proxy that just passes all the MySQL queries to the SQLite database.
  * Most queries will fail, but some will work.
  */
 
