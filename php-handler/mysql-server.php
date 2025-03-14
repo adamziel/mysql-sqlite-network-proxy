@@ -525,62 +525,65 @@ class MultiClientMySQLSocketServer {
             $except = null;
 
             // Wait for activity on any socket
-            if (socket_select($read, $write, $except, null) > 0) {
-                // Check if there's a new connection
-                if (in_array($this->socket, $read)) {
-                    $client = socket_accept($this->socket);
-                    if ($client) {
-                        echo "New client connected.\n";
-                        $this->clients[] = $client;
-                        $clientId = spl_object_id($client);
-                        $this->clientServers[$clientId] = new MySQLGateway($this->query_handler);
-                        
-                        // Send initial handshake
-                        $handshake = $this->clientServers[$clientId]->getInitialHandshake();
-                        socket_write($client, $handshake);
-                    }
-                    // Remove server socket from read array
-                    unset($read[array_search($this->socket, $read)]);
-                }
+			$select_result = socket_select($read, $write, $except, null);
+			if($select_result === false || $select_result <= 0) {
+				continue;
+			}
+			
+			// Check if there's a new connection
+			if (in_array($this->socket, $read)) {
+				$client = socket_accept($this->socket);
+				if ($client) {
+					echo "New client connected.\n";
+					$this->clients[] = $client;
+					$clientId = spl_object_id($client);
+					$this->clientServers[$clientId] = new MySQLGateway($this->query_handler);
+					
+					// Send initial handshake
+					$handshake = $this->clientServers[$clientId]->getInitialHandshake();
+					socket_write($client, $handshake);
+				}
+				// Remove server socket from read array
+				unset($read[array_search($this->socket, $read)]);
+			}
 
-                // Handle client activity
-                foreach ($read as $client) {
-                    $data = @socket_read($client, 4096);
-                    if ($data === false || $data === '') {
-                        // Client disconnected
-                        echo "Client disconnected.\n";
-                        $clientId = spl_object_id($client);
-                        $this->clientServers[$clientId]->reset();
-                        unset($this->clientServers[$clientId]);
-                        socket_close($client);
-                        unset($this->clients[array_search($client, $this->clients)]);
-                        continue;
-                    }
+			// Handle client activity
+			foreach ($read as $client) {
+				$data = @socket_read($client, 4096);
+				if ($data === false || $data === '') {
+					// Client disconnected
+					echo "Client disconnected.\n";
+					$clientId = spl_object_id($client);
+					$this->clientServers[$clientId]->reset();
+					unset($this->clientServers[$clientId]);
+					socket_close($client);
+					unset($this->clients[array_search($client, $this->clients)]);
+					continue;
+				}
 
-                    try {
-                        // Process the data
-                        $clientId = spl_object_id($client);
-                        $response = $this->clientServers[$clientId]->receiveBytes($data);
-                        if ($response) {
-                            socket_write($client, $response);
-                        }
+				try {
+					// Process the data
+					$clientId = spl_object_id($client);
+					$response = $this->clientServers[$clientId]->receiveBytes($data);
+					if ($response) {
+						socket_write($client, $response);
+					}
 
-                        // Process any buffered data
-                        while ($this->clientServers[$clientId]->hasBufferedData()) {
-                            try {
-                                $response = $this->clientServers[$clientId]->receiveBytes('');
-                                if ($response) {
-                                    socket_write($client, $response);
-                                }
-                            } catch (IncompleteInputException $e) {
-                                break;
-                            }
-                        }
-                    } catch (IncompleteInputException $e) {
-                        continue;
-                    }
-                }
-            }
+					// Process any buffered data
+					while ($this->clientServers[$clientId]->hasBufferedData()) {
+						try {
+							$response = $this->clientServers[$clientId]->receiveBytes('');
+							if ($response) {
+								socket_write($client, $response);
+							}
+						} catch (IncompleteInputException $e) {
+							break;
+						}
+					}
+				} catch (IncompleteInputException $e) {
+					continue;
+				}
+			}
         }
     }
 }
