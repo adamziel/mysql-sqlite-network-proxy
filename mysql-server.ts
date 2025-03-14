@@ -216,7 +216,7 @@ server.on('connection', (conn) => {
 
 	conn.on('query', async (sql) => {
 		try {
-			console.log('Running a SQLite query', sql);
+			console.log('Running a MySQL query on SQLite:', sql);
 			const result = await mysqlToSqliteProxy.runQuery(sql);
 			if (result.result_type === 'ok') {
 				conn.writeOk();
