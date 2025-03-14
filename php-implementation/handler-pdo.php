@@ -59,15 +59,9 @@ class PDOHandler implements MySQLQueryHandler {
 			}
 			
 			$columns[] = [
-				'catalog' => 'sqlite',
-				'schema' => '',
-				'table' => '',
-				'orgTable' => '',
 				'name' => $key,
-				'orgName' => '',
-				'characterSet' => 63,
-				'columnLength' => $columnLength,
-				'columnType' => $columnType,
+				'length' => $columnLength ?? 1,
+				'type' => $columnType,
 				'flags' => 129,
 				'decimals' => $decimals
 			];
