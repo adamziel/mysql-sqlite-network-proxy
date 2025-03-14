@@ -74,8 +74,40 @@ class MySQLProtocol {
     // MySQL status flags
     const SERVER_STATUS_AUTOCOMMIT    = 0x0002;
 
-    // MySQL command types
+	/**
+	 * MySQL command types
+	 * 
+	 * @see https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_command_phase.html
+	 */
+	/** Tells the server that the client wants it to close the connection. */
+	const COM_QUIT                    = 0x01;
+	/** Tells the server to execute a query. */
     const COM_QUERY                   = 0x03;
+	/** Check if the server is alive. */
+    const COM_PING                    = 0x0E;
+	/** Tells the server to send the binlog dump. */
+    const COM_BINLOG_DUMP             = 0x12;
+	/** Tells the server to register a slave. */
+    const COM_REGISTER_SLAVE          = 0x15;
+	/**
+	 * The server returns a COM_STMT_PREPARE Response which contains a statement-id which is ised to identify the prepared statement.
+	 */
+    const COM_STMT_PREPARE            = 0x16;
+	/**
+	 * Asks the server to execute a prepared statement as identified by statement_id.
+	 */
+    const COM_STMT_EXECUTE            = 0x17;
+    const COM_STMT_CLOSE              = 0x19;
+	/**
+	 * COM_STMT_RESET resets the data of a prepared statement which was accumulated with
+	 * COM_STMT_SEND_LONG_DATA commands and closes the cursor if it was opened with
+	 * COM_STMT_EXECUTE.
+	 * 
+	 * The server will send a OK_Packet if the statement could be reset, a ERR_Packet if not.
+	 * 
+	 * @see https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_com_stmt_reset.html
+	 */
+    const COM_STMT_RESET              = 0x1A;
 
     // Special packet markers
     const OK_PACKET    = 0x00;
