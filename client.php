@@ -25,3 +25,10 @@ $stmt->execute(['id' => 0]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
 var_dump($row);
+
+
+$stmt = $pdo->prepare("SELECT * FROM wptests_users WHERE ID > :id");
+$stmt->execute(['id' => 0]);
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+var_dump($row);
