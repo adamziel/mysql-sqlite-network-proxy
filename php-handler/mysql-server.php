@@ -432,8 +432,7 @@ class MySQLGateway {
     }
 }
 
-// Example adapter that uses the StreamableMySQLServer with sockets
-class MySQLSocketServer {
+class SingleUseMySQLSocketServer {
     private $server;
     private $socket;
     private $port;
@@ -497,9 +496,91 @@ class MySQLSocketServer {
             }
         }
         
-        echo "Client disconnected.\n";
+        echo "Client disconnected, terminating the server.\n";
         $this->server->reset();
     }
 }
 
+class MultiClientMySQLSocketServer {
+    private $query_handler;
+    private $socket;
+    private $port;
+    private $clients = [];
+    private $clientServers = [];
 
+    public function __construct(MySQLQueryHandler $query_handler, $options = []) {
+        $this->query_handler = $query_handler;
+        $this->port = $options['port'] ?? 3306;
+    }
+
+    public function start() {
+        $this->socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        socket_bind($this->socket, '0.0.0.0', $this->port);
+        socket_listen($this->socket);
+        echo "MySQL PHP Server listening on port {$this->port}...\n";
+        while (true) {
+            // Prepare arrays for socket_select()
+            $read = array_merge([$this->socket], $this->clients);
+            $write = null;
+            $except = null;
+
+            // Wait for activity on any socket
+            if (socket_select($read, $write, $except, null) > 0) {
+                // Check if there's a new connection
+                if (in_array($this->socket, $read)) {
+                    $client = socket_accept($this->socket);
+                    if ($client) {
+                        echo "New client connected.\n";
+                        $this->clients[] = $client;
+                        $clientId = spl_object_id($client);
+                        $this->clientServers[$clientId] = new MySQLGateway($this->query_handler);
+                        
+                        // Send initial handshake
+                        $handshake = $this->clientServers[$clientId]->getInitialHandshake();
+                        socket_write($client, $handshake);
+                    }
+                    // Remove server socket from read array
+                    unset($read[array_search($this->socket, $read)]);
+                }
+
+                // Handle client activity
+                foreach ($read as $client) {
+                    $data = @socket_read($client, 4096);
+                    if ($data === false || $data === '') {
+                        // Client disconnected
+                        echo "Client disconnected.\n";
+                        $clientId = spl_object_id($client);
+                        $this->clientServers[$clientId]->reset();
+                        unset($this->clientServers[$clientId]);
+                        socket_close($client);
+                        unset($this->clients[array_search($client, $this->clients)]);
+                        continue;
+                    }
+
+                    try {
+                        // Process the data
+                        $clientId = spl_object_id($client);
+                        $response = $this->clientServers[$clientId]->receiveBytes($data);
+                        if ($response) {
+                            socket_write($client, $response);
+                        }
+
+                        // Process any buffered data
+                        while ($this->clientServers[$clientId]->hasBufferedData()) {
+                            try {
+                                $response = $this->clientServers[$clientId]->receiveBytes('');
+                                if ($response) {
+                                    socket_write($client, $response);
+                                }
+                            } catch (IncompleteInputException $e) {
+                                break;
+                            }
+                        }
+                    } catch (IncompleteInputException $e) {
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+}

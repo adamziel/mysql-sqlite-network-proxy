@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/mysql-server.php';
 
-$server = new MySQLSocketServer(new class implements MySQLQueryHandler {
+$server = new MultiClientMySQLSocketServer(new class implements MySQLQueryHandler {
 	public function handleQuery(string $query): MySQLServerQueryResult {
 		if(!str_starts_with(strtolower($query), 'select')) {
 			return new OkayPacketResult(0, 0);
