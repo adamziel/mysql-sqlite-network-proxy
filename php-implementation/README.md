@@ -6,6 +6,8 @@ This example is 100% PHP and dependency–free. It can run both on a PHP host or
 
 ## Implementation overview
 
+The most interesting code is in the [mysql-server.php](./mysql-server.php) file.
+
 Here's how the `Network -> Decoded query -> Query results -> Network` pipeline works:
 
 * The `MySQLProtocol` class handles decoding and encoding of MySQL protocol packets.
