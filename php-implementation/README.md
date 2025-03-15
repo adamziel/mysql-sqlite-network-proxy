@@ -28,7 +28,7 @@ Run the MySQL <-> SQLite proxy server
 
 ```bash
 cd php-implementation
-php run-sqlite-translation
+php run-sqlite-translation.php
 ```
 
 Run the MySQL client:
