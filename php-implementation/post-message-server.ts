@@ -60,64 +60,57 @@ const invertPromise = <T>(): InvertedPromise<T> => {
 	return { promise, resolve, reject };
 };
 
-type QueryResult = {
-	rows: any[];
-	columns: any[];
-	result_type: 'ok' | 'resultset';
-};
-
 type DatabaseState =
 	| {
 			state: 'awaiting_readiness';
 	  }
 	| {
-			state: 'php_ready_for_event';
-			provideEvent: (event: PHPEvent) => void;
+			state: 'php_ready_for_command';
+			provideCommand: (enqueuedCommand: PHPEnqueuedCommand) => void;
 	  }
 	| {
 			state: 'awaiting_php_response';
-			event: PHPEvent;
+			enqueuedCommand: PHPEnqueuedCommand;
 	  }
 	| {
 			state: 'closed';
 	  };
 
-type PHPEvent = {
-	event: any;
-	receiveResponseFromPHP: InvertedPromise<QueryResult>;
+type PHPEnqueuedCommand = {
+	command: PHPCommand;
+	receiveResponseFromPHP: InvertedPromise<string>;
 };
 
-class WordPressDatabase extends EventEmitter {
+type PHPCommand = {
+	type: string;
+	data?: string | Uint8Array | ArrayBuffer | Buffer;
+	[key: string]: any;
+};
+
+class PHPMessageServer extends EventEmitter {
 	public state: DatabaseState = { state: 'awaiting_readiness' };
 	private php: PHP;
-	private eventsForWordPress: PHPEvent[] = [];
+	private enqueuedCommands: PHPEnqueuedCommand[] = [];
 
-	constructor(php: PHP) {
+	constructor(php: PHP, phpScript: string) {
 		super();
 		this.php = php;
-		this.setupMessageHandler();
-	}
-
-	private setupMessageHandler() {
 		this.php.onMessage(async (message): Promise<any> => {
 			const parsedMessage = JSON.parse(message);
 			switch (parsedMessage.type) {
 				case 'ready_for_event':
 					if (this.state.state === 'awaiting_php_response') {
 						// The response isn't coming, let's propagate an empty one.
-						this.state.event.receiveResponseFromPHP.resolve({
-							data: new Uint8Array(),
-						});
-						this.state.event = null;
+						this.state.enqueuedCommand.receiveResponseFromPHP.resolve('');
 					}
 					const sendToPHP = invertPromise();
 					this.state = {
-						state: 'php_ready_for_event',
-						provideEvent: (event: PHPEvent) => {
-							sendToPHP.resolve(JSON.stringify(event.event));
+						state: 'php_ready_for_command',
+						provideCommand: (enqueuedCommand: PHPEnqueuedCommand) => {
+							sendToPHP.resolve(JSON.stringify(enqueuedCommand.command));
 							this.state = {
 								state: 'awaiting_php_response',
-								event,
+								enqueuedCommand,
 							};
 						},
 					};
@@ -127,7 +120,7 @@ class WordPressDatabase extends EventEmitter {
 					if (this.state.state !== 'awaiting_php_response') {
 						throw new Error('Received response from PHP but not awaiting a response');
 					}
-					this.state.event.receiveResponseFromPHP.resolve(parsedMessage);
+					this.state.enqueuedCommand.receiveResponseFromPHP.resolve(parsedMessage.data);
 					this.state = {
 						state: 'awaiting_readiness',
 					};
@@ -136,35 +129,25 @@ class WordPressDatabase extends EventEmitter {
 		});
 
 		this.php.run({
-			code: `<?php
-			$dir = '/wordpress/wp-content/plugins/mysql-server';
-			require_once $dir . '/mysql-server.php';
-			require_once $dir . '/handler-sqlite-translation.php';
-
-			$server = new MySQLPlaygroundYieldServer(
-				new SQLiteTranslationHandler('/wordpress/wp-content/database/.ht.sqlite'),
-				['port' => 3306]
-			);
-			$server->start();
-			`,
+			code: phpScript,
 		});
 	}
 
-	async sendEventToWordPress(event: any): Promise<QueryResult> {
-		const eventForWordPress = {
-			event,
-			receiveResponseFromPHP: invertPromise<QueryResult>(),
+	async sendCommand(command: PHPCommand): Promise<string> {
+		const enqueuedCommand = {
+			command,
+			receiveResponseFromPHP: invertPromise<string>(),
 		};
-		this.eventsForWordPress.push(eventForWordPress);
+		this.enqueuedCommands.push(enqueuedCommand);
 		this.processNextEvent();
-		return eventForWordPress.receiveResponseFromPHP.promise;
+		return enqueuedCommand.receiveResponseFromPHP.promise;
 	}
 
-	processNextEvent() {
-		if (this.state.state === 'php_ready_for_event') {
-			const event = this.eventsForWordPress.shift();
-			if (event) {
-				this.state.provideEvent(event);
+	private processNextEvent() {
+		if (this.state.state === 'php_ready_for_command') {
+			const enqueuedCommand = this.enqueuedCommands.shift();
+			if (enqueuedCommand) {
+				this.state.provideCommand(enqueuedCommand);
 			}
 		}
 	}
@@ -177,6 +160,21 @@ await mysqlServerInstance.mount(
 	'/wordpress/wp-content/plugins/mysql-server',
 	createNodeFsMountHandler(import.meta.dirname)
 );
+const WordPressDatabase = new PHPMessageServer(
+	mysqlServerInstance,
+	`<?php
+	$dir = '/wordpress/wp-content/plugins/mysql-server';
+	require_once $dir . '/mysql-server.php';
+	require_once $dir . '/handler-sqlite-translation.php';
+
+	$server = new MySQLPlaygroundYieldServer(
+		new SQLiteTranslationHandler('/wordpress/wp-content/database/.ht.sqlite'),
+		['port' => 3306]
+	);
+	$server->start();
+	`
+);
+
 console.log('Mounted mysql-server');
 class MySQLWebSocket {
 	static maxClientId = 1;
@@ -184,13 +182,13 @@ class MySQLWebSocket {
 	readyState: number = 0;
 	binaryType: 'arraybuffer';
 	listeners: Map<string, Set<Function>>;
-	database: WordPressDatabase;
+	database: PHPMessageServer;
 
 	constructor(options: any, options2: any) {
 		console.log('MySQLWebSocket constructor', options, options2);
 		this.clientId = MySQLWebSocket.maxClientId++;
 		this.listeners = new Map();
-		this.database = new WordPressDatabase(mysqlServerInstance);
+		this.database = WordPressDatabase;
 		this.readyState = 0;
 		this.binaryType = 'arraybuffer';
 
@@ -201,24 +199,31 @@ class MySQLWebSocket {
 		this.sendJsonCommand({ type: 'new_connection' });
 	}
 
-	async sendJsonCommand(object: any) {
-		object.clientId = this.clientId;
-		const response = await this.database.sendEventToWordPress(object);
-		try {
-			const decodedData = Buffer.from(response.data, 'base64');
-			this.emit('message', decodedData);
-		} catch (error) {
-			console.error('Failed to decode base64 data:', error);
-			this.emit('message', response.data);
-		}
-	}
-
 	/**
 	 *
 	 * @param data
 	 */
 	send(data: any) {
-		this.sendJsonCommand({ type: 'data_received', data: Buffer.from(data).toString('base64') });
+		this.sendJsonCommand({
+			type: 'data_received',
+			data: Buffer.from(data).toString('base64'),
+		});
+	}
+
+	async sendJsonCommand(command: {
+		type: string;
+		data?: string | Uint8Array | ArrayBuffer | Buffer;
+	}) {
+		const response = await this.database.sendCommand({
+			clientId: this.clientId,
+			...command,
+		});
+		try {
+			this.emit('message', Buffer.from(response, 'base64'));
+		} catch (error) {
+			console.error('Failed to decode base64 data:', error);
+			this.emit('message', response);
+		}
 	}
 
 	on(eventName: string, callback: (e: any) => void) {
@@ -237,7 +242,10 @@ class MySQLWebSocket {
 		if (!this.listeners.has(eventName)) {
 			this.listeners.set(eventName, new Set());
 		}
-		this.listeners.get(eventName).add(callback);
+		const listeners = this.listeners.get(eventName);
+		if (listeners) {
+			listeners.add(callback);
+		}
 	}
 
 	removeListener(eventName: string, callback: (e: any) => void) {
@@ -279,7 +287,7 @@ class MySQLWebSocket {
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	onerror(data: any) {}
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	onmessage(data: any) {}
+	onmessage(data: any, isBinary: boolean) {}
 	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	onopen(data: any) {}
 }
@@ -319,13 +327,32 @@ CREATE TABLE wptests_users (
 	PRIMARY KEY  (ID),
 )
 	");
-$result = $pdo->exec("INSERT INTO wptests_users (decimal_column, float_column, enum_column, date_column) VALUES (123.45, 678.90, 'b', '2024-02-14')");
+$result = $pdo->exec("INSERT INTO wptests_users (decimal_column, float_column, enum_column, date_column) VALUES (123.45, 678.90, 'bcd', '2024-02-14')");
 
 $stmt = $pdo->prepare("SELECT * FROM wptests_users WHERE ID > :id");
 $stmt->execute(['id' => 0]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
 var_dump($row);
+
+// Also test with mysqli connection
+$mysqli = new mysqli("127.0.0.1", "root", "", "test");
+
+// Check connection
+if ($mysqli->connect_errno) {
+    die("MySQLi connection failed: " . $mysqli->connect_error . PHP_EOL);
+}
+
+// Run a query using mysqli
+$mysqli_result = $mysqli->query("SELECT * FROM wptests_users WHERE ID = 1");
+$mysqli_row = $mysqli_result->fetch_assoc();
+
+echo PHP_EOL . "MySQLi result:" . PHP_EOL;
+var_dump($mysqli_row);
+
+// Close the connection
+$mysqli->close();
+
 
   `,
 });
