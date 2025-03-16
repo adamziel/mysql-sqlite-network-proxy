@@ -530,6 +530,13 @@ class SingleUseMySQLSocketServer {
     }
 }
 
+if(!function_exists('post_message_to_js')) {
+	function post_message_to_js(string $message) {
+		echo 'The "post_message_to_js" function is only available in WordPress Playground but you are running it in a standalone PHP environment.' . PHP_EOL;
+		echo 'The message was: ' . $message . PHP_EOL;
+	}
+}
+
 class MySQLSocketServer {
     private $query_handler;
     private $socket;
@@ -614,5 +621,118 @@ class MySQLSocketServer {
 				}
 			}
         }
+    }
+}
+
+
+class MySQLPlaygroundYieldServer {
+    private $query_handler;
+    private $clients = [];
+    private $clientServers = [];
+    private $port;
+
+    public function __construct(MySQLQueryHandler $query_handler, $options = []) {
+        $this->query_handler = $query_handler;
+        $this->port = $options['port'] ?? 3306;
+    }
+
+    public function start() {
+        echo "MySQL PHP Server listening via message passing on port {$this->port}...\n";
+
+        // Main event loop
+        while (true) {
+            // Wait for a message from JS
+            $message = post_message_to_js(json_encode([
+				'type' => 'ready_for_event'
+			]));
+
+            $event = json_decode($message, true);
+			var_dump('decoded event', $event);
+            if (!$event || !isset($event['type'])) {
+                continue;
+            }
+            
+            switch ($event['type']) {
+                case 'new_connection':
+                    $this->handleNewConnection($event['clientId']);
+                    break;
+                    
+                case 'data_received':
+                    $this->handleDataReceived($event['clientId'], $event['data']);
+                    break;
+                    
+                case 'client_disconnected':
+                    $this->handleClientDisconnected($event['clientId']);
+                    break;
+            }
+        }
+    }
+    
+    private function handleNewConnection($clientId) {
+        echo "New client connected (ID: $clientId).\n";
+        $this->clients[] = $clientId;
+        $this->clientServers[$clientId] = new MySQLGateway($this->query_handler);
+        
+        // Send initial handshake
+        $handshake = $this->clientServers[$clientId]->getInitialHandshake();
+		$this->sendResponse($clientId, $handshake);
+    }
+    
+    private function handleDataReceived($clientId, $encodedData) {
+        if (!isset($this->clientServers[$clientId])) {
+			throw new IncompleteInputException('No client server found');
+            return;
+        }
+        
+        $data = base64_decode($encodedData);
+        
+        try {
+            // Process the data
+            $response = $this->clientServers[$clientId]->receiveBytes($data);
+            if ($response) {
+                $this->sendResponse($clientId, $response);
+            } else {
+				throw new IncompleteInputException('No response from client');
+            }
+            
+            // Process any buffered data
+            while ($this->clientServers[$clientId]->hasBufferedData()) {
+                try {
+                    $response = $this->clientServers[$clientId]->receiveBytes('');
+                    if ($response) {
+                        $this->sendResponse($clientId, $response);
+                    }
+                } catch (IncompleteInputException $e) {
+					throw $e;
+                    break;
+                }
+            }
+        } catch (IncompleteInputException $e) {
+            // Not enough data yet, wait for mo
+			throw $e;
+        }
+    }
+    
+    private function handleClientDisconnected($clientId) {
+        echo "Client disconnected (ID: $clientId).\n";
+        if (isset($this->clientServers[$clientId])) {
+            $this->clientServers[$clientId]->reset();
+            unset($this->clientServers[$clientId]);
+        }
+        
+        $index = array_search($clientId, $this->clients);
+        if ($index !== false) {
+            unset($this->clients[$index]);
+        }
+    }
+    
+    private function sendResponse($clientId, $data) {
+		var_dump('sending response');
+        $response = json_encode([
+            'type' => 'response_from_php',
+            'clientId' => $clientId,
+            'data' => base64_encode($data)
+        ]);
+        post_message_to_js($response);
     }
 }
