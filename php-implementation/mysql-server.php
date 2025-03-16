@@ -646,23 +646,23 @@ class MySQLPlaygroundYieldServer {
 				'type' => 'ready_for_event'
 			]));
 
-            $event = json_decode($message, true);
-			var_dump('decoded event', $event);
-            if (!$event || !isset($event['type'])) {
+            $command = json_decode($message, true);
+			var_dump('decoded event', $command);
+            if (!$command || !isset($command['type'])) {
                 continue;
             }
             
-            switch ($event['type']) {
+            switch ($command['type']) {
                 case 'new_connection':
-                    $this->handleNewConnection($event['clientId']);
+                    $this->handleNewConnection($command['clientId']);
                     break;
                     
                 case 'data_received':
-                    $this->handleDataReceived($event['clientId'], $event['data']);
+                    $this->handleDataReceived($command['clientId'], $command['data']);
                     break;
                     
                 case 'client_disconnected':
-                    $this->handleClientDisconnected($event['clientId']);
+                    $this->handleClientDisconnected($command['clientId']);
                     break;
             }
         }
