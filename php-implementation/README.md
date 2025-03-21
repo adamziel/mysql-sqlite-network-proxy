@@ -40,4 +40,4 @@ php client.php
 ## Limitations
 
 * We only reply with a resultset (for SELECT) or an OK packet (for other queries). Error packets are not yet implemented. Nuances of the query-specific expected response format are not yet implemented, too.
-* `mysql` CLI client is unable to connect to the proxy server due to `mysql2` library limitations.
+* `mysql` CLI client is unable to connect to the proxy server yet
