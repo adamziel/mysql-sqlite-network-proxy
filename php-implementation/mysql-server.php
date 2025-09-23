@@ -398,17 +398,150 @@ class MySQLGateway {
      * @return string Response packet to send back
      */
     private function processAuthentication(string $payload): string {
-        // For simplicity, we're auto-accepting all auth attempts
-        // In a real implementation, you would parse the handshake response
-        // and verify username/password
-        
+        $offset = 0;
+        $payloadLength = strlen($payload);
+
+        $capabilityFlags = $this->readUnsignedIntLittleEndian($payload, $offset, 4);
+        $offset += 4;
+
+        $clientMaxPacketSize = $this->readUnsignedIntLittleEndian($payload, $offset, 4);
+        $offset += 4;
+
+        $clientCharacterSet = 0;
+        if ($offset < $payloadLength) {
+            $clientCharacterSet = ord($payload[$offset]);
+        }
+        $offset += 1;
+
+        // Skip reserved bytes (always zero)
+        $offset = min($payloadLength, $offset + 23);
+
+        $username = $this->readNullTerminatedString($payload, $offset);
+
+        $authResponse = '';
+        if ($capabilityFlags & MySQLProtocol::CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) {
+            $authResponseLength = $this->readLengthEncodedInt($payload, $offset);
+            $authResponse = substr($payload, $offset, $authResponseLength);
+            $offset = min($payloadLength, $offset + $authResponseLength);
+        } elseif ($capabilityFlags & MySQLProtocol::CLIENT_SECURE_CONNECTION) {
+            $authResponseLength = 0;
+            if ($offset < $payloadLength) {
+                $authResponseLength = ord($payload[$offset]);
+            }
+            $offset += 1;
+            $authResponse = substr($payload, $offset, $authResponseLength);
+            $offset = min($payloadLength, $offset + $authResponseLength);
+        } else {
+            $authResponse = $this->readNullTerminatedString($payload, $offset);
+        }
+
+        $database = '';
+        if ($capabilityFlags & MySQLProtocol::CLIENT_CONNECT_WITH_DB) {
+            $database = $this->readNullTerminatedString($payload, $offset);
+        }
+
+        $authPluginName = '';
+        if ($capabilityFlags & MySQLProtocol::CLIENT_PLUGIN_AUTH) {
+            $authPluginName = $this->readNullTerminatedString($payload, $offset);
+        }
+
+        if ($capabilityFlags & MySQLProtocol::CLIENT_CONNECT_ATTRS) {
+            $attrsLength = $this->readLengthEncodedInt($payload, $offset);
+            $offset = min($payloadLength, $offset + $attrsLength);
+        }
+
         $this->authenticated = true;
-        $this->sequence_id = 2;  // sequence continues: handshake was seq 0, auth response seq 1
-        
+        $this->sequence_id = 2;
+
+        $responsePackets = '';
+
+        if ($authPluginName === MySQLProtocol::AUTH_PLUGIN_NAME) {
+            $fastAuthPayload = chr(MySQLProtocol::AUTH_MORE_DATA) . chr(MySQLProtocol::CACHING_SHA2_FAST_AUTH);
+            $responsePackets .= MySQLProtocol::encodeInt24(strlen($fastAuthPayload));
+            $responsePackets .= MySQLProtocol::encodeInt8($this->sequence_id++);
+            $responsePackets .= $fastAuthPayload;
+        }
+
         $okPacket = MySQLProtocol::buildOkPacket();
-        return MySQLProtocol::encodeInt24(strlen($okPacket)) . 
-               MySQLProtocol::encodeInt8($this->sequence_id++) . 
-               $okPacket;
+        $responsePackets .= MySQLProtocol::encodeInt24(strlen($okPacket));
+        $responsePackets .= MySQLProtocol::encodeInt8($this->sequence_id++);
+        $responsePackets .= $okPacket;
+
+        return $responsePackets;
+    }
+
+    private function readUnsignedIntLittleEndian(string $payload, int $offset, int $length): int {
+        $slice = substr($payload, $offset, $length);
+        if ($slice === '' || $length <= 0) {
+            return 0;
+        }
+
+        switch ($length) {
+            case 1:
+                return ord($slice[0]);
+            case 2:
+                $padded = str_pad($slice, 2, "\x00", STR_PAD_RIGHT);
+                $unpacked = unpack('v', $padded);
+                return $unpacked[1] ?? 0;
+            case 3:
+            case 4:
+            default:
+                $padded = str_pad($slice, 4, "\x00", STR_PAD_RIGHT);
+                $unpacked = unpack('V', $padded);
+                return $unpacked[1] ?? 0;
+        }
+    }
+
+    private function readNullTerminatedString(string $payload, int &$offset): string {
+        $nullPosition = strpos($payload, "\0", $offset);
+        if ($nullPosition === false) {
+            $result = substr($payload, $offset);
+            $offset = strlen($payload);
+            return $result;
+        }
+
+        $result = substr($payload, $offset, $nullPosition - $offset);
+        $offset = $nullPosition + 1;
+        return $result;
+    }
+
+    private function readLengthEncodedInt(string $payload, int &$offset): int {
+        if ($offset >= strlen($payload)) {
+            return 0;
+        }
+
+        $first = ord($payload[$offset]);
+        $offset += 1;
+
+        if ($first < 0xfb) {
+            return $first;
+        }
+
+        if ($first === 0xfb) {
+            return 0;
+        }
+
+        if ($first === 0xfc) {
+            $value = $this->readUnsignedIntLittleEndian($payload, $offset, 2);
+            $offset += 2;
+            return $value;
+        }
+
+        if ($first === 0xfd) {
+            $value = $this->readUnsignedIntLittleEndian($payload, $offset, 3);
+            $offset += 3;
+            return $value;
+        }
+
+        // 0xfe indicates an 8-byte integer
+        $value = 0;
+        $slice = substr($payload, $offset, 8);
+        if ($slice !== '') {
+            $slice = str_pad($slice, 8, "\x00");
+            $value = unpack('P', $slice)[1];
+        }
+        $offset += 8;
+        return (int) $value;
     }
 
     /**
@@ -576,7 +709,9 @@ class MySQLSocketServer {
 					$this->clientServers[$clientId] = new MySQLGateway($this->query_handler);
 					
 					// Send initial handshake
+                    echo "Pre handshake\n";
 					$handshake = $this->clientServers[$clientId]->getInitialHandshake();
+                    echo "Post handshake\n";
 					socket_write($client, $handshake);
 				}
 				// Remove server socket from read array
@@ -584,8 +719,24 @@ class MySQLSocketServer {
 			}
 
 			// Handle client activity
+            echo "Waiting for client activity\n";
 			foreach ($read as $client) {
+                echo "calling socket_read\n";
 				$data = @socket_read($client, 4096);
+                echo "socket_read returned\n";
+                $display = '';
+                for ($i = 0; $i < strlen($data); $i++) {
+                    $byte = ord($data[$i]);
+                    if ($byte >= 32 && $byte <= 126) {
+                        // Printable ASCII character
+                        $display .= $data[$i];
+                    } else {
+                        // Non-printable, show as hex
+                        $display .= sprintf('%02x ', $byte);
+                    }
+                }
+                echo rtrim($display) . "\n";
+                
 				if ($data === false || $data === '') {
 					// Client disconnected
 					echo "Client disconnected.\n";
@@ -600,13 +751,18 @@ class MySQLSocketServer {
 				try {
 					// Process the data
 					$clientId = spl_object_id($client);
+                    echo "Receiving bytes\n";
 					$response = $this->clientServers[$clientId]->receiveBytes($data);
 					if ($response) {
+						echo "Writing response\n";
+						echo $response;
 						socket_write($client, $response);
 					}
+                    echo "Response written\n";
 
 					// Process any buffered data
 					while ($this->clientServers[$clientId]->hasBufferedData()) {
+                        echo "Processing buffered data\n";
 						try {
 							$response = $this->clientServers[$clientId]->receiveBytes('');
 							if ($response) {
@@ -616,10 +772,13 @@ class MySQLSocketServer {
 							break;
 						}
 					}
+                    echo "After the while loop\n";
 				} catch (IncompleteInputException $e) {
+                    echo "Incomplete input exception\n";
 					continue;
 				}
 			}
+            echo "restarting the while() loop!\n";
         }
     }
 }

@@ -22,7 +22,7 @@ class SQLiteTranslationHandler implements MySQLQueryHandler {
 	public function __construct($sqlite_database_path) {
 		define('FQDB', $sqlite_database_path);
 		define('FQDBDIR', dirname(FQDB) . '/');
-		$this->wpdb = new WP_SQLite_DB();
+		$this->wpdb = new WP_SQLite_DB($sqlite_database_path);
 	}
 
 	public function handleQuery(string $query): MySQLServerQueryResult {
