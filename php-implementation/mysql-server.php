@@ -76,38 +76,42 @@ class MySQLProtocol {
 
 	/**
 	 * MySQL command types
-	 * 
+	 *
 	 * @see https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_command_phase.html
 	 */
-	/** Tells the server that the client wants it to close the connection. */
-	const COM_QUIT                    = 0x01;
-	/** Tells the server to execute a query. */
-    const COM_QUERY                   = 0x03;
-	/** Check if the server is alive. */
-    const COM_PING                    = 0x0E;
-	/** Tells the server to send the binlog dump. */
-    const COM_BINLOG_DUMP             = 0x12;
-	/** Tells the server to register a slave. */
-    const COM_REGISTER_SLAVE          = 0x15;
-	/**
-	 * The server returns a COM_STMT_PREPARE Response which contains a statement-id which is ised to identify the prepared statement.
-	 */
-    const COM_STMT_PREPARE            = 0x16;
-	/**
-	 * Asks the server to execute a prepared statement as identified by statement_id.
-	 */
-    const COM_STMT_EXECUTE            = 0x17;
-    const COM_STMT_CLOSE              = 0x19;
-	/**
-	 * COM_STMT_RESET resets the data of a prepared statement which was accumulated with
-	 * COM_STMT_SEND_LONG_DATA commands and closes the cursor if it was opened with
-	 * COM_STMT_EXECUTE.
-	 * 
-	 * The server will send a OK_Packet if the statement could be reset, a ERR_Packet if not.
-	 * 
-	 * @see https://dev.mysql.com/doc/dev/mysql-server/8.4.3/page_protocol_com_stmt_reset.html
-	 */
-    const COM_STMT_RESET              = 0x1A;
+    const COM_SLEEP               = 0x00; /** Tells the server to sleep for the given number of seconds. */
+	const COM_QUIT                = 0x01; /** Tells the server that the client wants it to close the connection. */
+    const COM_INIT_DB             = 0x02; /** Change the default schema of the connection. */
+    const COM_QUERY               = 0x03; /** Tells the server to execute a query. */
+    const COM_FIELD_LIST          = 0x04; /** Deprecated. Returns the list of fields for the given table. */
+    const COM_CREATE_DB           = 0x05; /** Currently refused by the server. */
+    const COM_DROP_DB             = 0x06; /** Currently refused by the server. */
+    const COM_UNUSED_2            = 0x07; /** Unused. Used to be COM_REFRESH. */
+    const COM_UNUSED_1            = 0x08; /** Unused. Used to be COM_SHUTDOWN. */
+    const COM_STATISTICS          = 0x09; /** Get a human readable string of some internal status vars. */
+    const COM_UNUSED_4            = 0x0A; /** Unused. Used to be COM_PROCESS_INFO. */
+    const COM_CONNECT             = 0x0B; /** Currently refused by the server. */
+    const COM_UNUSED_5            = 0x0C; /** Unused. Used to be COM_PROCESS_KILL. */
+    const COM_DEBUG               = 0x0D; /** Dump debug info to server's stdout. */
+    const COM_PING                = 0x0E; /** Check if the server is alive. */
+    const COM_TIME                = 0x0F; /** Currently refused by the server. */
+    const COM_DELAYED_INSERT      = 0x10; /** Functionality removed. */
+    const COM_CHANGE_USER         = 0x11; /** Change the user of the connection. */
+    const COM_BINLOG_DUMP         = 0x12; /** Tells the server to send the binlog dump. */
+    const COM_TABLE_DUMP          = 0x13; /** Tells the server to send the table dump. */
+    const COM_CONNECT_OUT         = 0x14; /** Currently refused by the server. */
+    const COM_REGISTER_SLAVE      = 0x15; /** Tells the server to register a slave. */
+    const COM_STMT_PREPARE        = 0x16; /** Tells the server to prepare a statement. */
+    const COM_STMT_EXECUTE        = 0x17; /** Tells the server to execute a prepared statement. */
+    const COM_STMT_SEND_LONG_DATA = 0x18; /** Tells the server to send long data for a prepared statement. */
+    const COM_STMT_CLOSE          = 0x19; /** Tells the server to close a prepared statement. */
+    const COM_STMT_RESET          = 0x1A; /** Tells the server to reset a prepared statement. */
+    const COM_SET_OPTION          = 0x1B; /** Tells the server to set an option. */
+    const COM_STMT_FETCH          = 0x1C; /** Tells the server to fetch a result from a prepared statement. */
+    const COM_DAEMON              = 0x1D; /** Currently refused by the server. */
+    const COM_BINLOG_DUMP_GTID    = 0x1E; /** Tells the server to send the binlog dump in GTID mode. */
+    const COM_RESET_CONNECTION    = 0x1F; /** Tells the server to reset the connection. */
+    const COM_CLONE               = 0x20; /** Tells the server to clone a server. */
 
     // Special packet markers
     const OK_PACKET    = 0x00;
@@ -120,11 +124,56 @@ class MySQLProtocol {
     const CACHING_SHA2_FULL_AUTH    = 4;
     const AUTH_PLUGIN_NAME          = 'caching_sha2_password';
 
+    // Field types
+    const FIELD_TYPE_DECIMAL     = 0x00;
+    const FIELD_TYPE_TINY        = 0x01;
+    const FIELD_TYPE_SHORT       = 0x02;
+    const FIELD_TYPE_LONG        = 0x03;
+    const FIELD_TYPE_FLOAT       = 0x04;
+    const FIELD_TYPE_DOUBLE      = 0x05;
+    const FIELD_TYPE_NULL        = 0x06;
+    const FIELD_TYPE_TIMESTAMP   = 0x07;
+    const FIELD_TYPE_LONGLONG    = 0x08;
+    const FIELD_TYPE_INT24       = 0x09;
+    const FIELD_TYPE_DATE        = 0x0a;
+    const FIELD_TYPE_TIME        = 0x0b;
+    const FIELD_TYPE_DATETIME    = 0x0c;
+    const FIELD_TYPE_YEAR        = 0x0d;
+    const FIELD_TYPE_NEWDATE     = 0x0e;
+    const FIELD_TYPE_VARCHAR     = 0x0f;
+    const FIELD_TYPE_BIT         = 0x10;
+    const FIELD_TYPE_NEWDECIMAL  = 0xf6;
+    const FIELD_TYPE_ENUM        = 0xf7;
+    const FIELD_TYPE_SET         = 0xf8;
+    const FIELD_TYPE_TINY_BLOB   = 0xf9;
+    const FIELD_TYPE_MEDIUM_BLOB = 0xfa;
+    const FIELD_TYPE_LONG_BLOB   = 0xfb;
+    const FIELD_TYPE_BLOB        = 0xfc;
+    const FIELD_TYPE_VAR_STRING  = 0xfd;
+    const FIELD_TYPE_STRING      = 0xfe;
+    const FIELD_TYPE_GEOMETRY    = 0xff;
+
+    // Field flags
+    const NOT_NULL_FLAG       = 0x1;
+    const PRI_KEY_FLAG        = 0x2;
+    const UNIQUE_KEY_FLAG     = 0x4;
+    const MULTIPLE_KEY_FLAG   = 0x8;
+    const BLOB_FLAG           = 0x10;
+    const UNSIGNED_FLAG       = 0x20;
+    const ZEROFILL_FLAG       = 0x40;
+    const BINARY_FLAG         = 0x80;
+    const ENUM_FLAG           = 0x100;
+    const AUTO_INCREMENT_FLAG = 0x200;
+    const TIMESTAMP_FLAG      = 0x400;
+    const SET_FLAG            = 0x800;
+
     // Character set and collation constants (using utf8mb4 general collation)
     const CHARSET_UTF8MB4 = 0xff;  // Collation ID 255 (utf8mb4_0900_ai_ci)
 
     // Max packet length constant
     const MAX_PACKET_LENGTH = 0x00ffffff;
+
+    private $current_db = '';
 
     // Helper: Packets assembly and parsing
     public static function encodeInt8(int $val): string {
@@ -382,6 +431,10 @@ class MySQLGateway {
         if ($command === MySQLProtocol::COM_QUERY) {
             $query = substr($payload, 1);
             return $this->processQuery($query);
+        } elseif ($command === MySQLProtocol::COM_INIT_DB) {
+            return $this->processQuery('USE ' . substr($payload, 1));
+        } elseif ($command === MySQLProtocol::COM_QUIT) {
+            return '';
         } else {
             // Unsupported command
             $errPacket = MySQLProtocol::buildErrPacket(0x04D2, "HY000", "Unsupported command");

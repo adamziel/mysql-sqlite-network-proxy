@@ -9,6 +9,12 @@ function apply_filters($tag, $value) {
 	return $value;
 }
 
+// A dummy polyfill – function is called by the wpdb class.
+function wp_debug_backtrace_summary( $ignore_class = null, $skip_frames = 0, $pretty = true ) {
+	return 'unknown';
+}
+
+require_once __DIR__ . '/sqlite-database-integration/version.php';
 require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-lexer.php';
 require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-query-rewriter.php';
 require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-translator.php';
@@ -22,7 +28,7 @@ class SQLiteTranslationHandler implements MySQLQueryHandler {
 	public function __construct($sqlite_database_path) {
 		define('FQDB', $sqlite_database_path);
 		define('FQDBDIR', dirname(FQDB) . '/');
-		$this->wpdb = new WP_SQLite_DB($sqlite_database_path);
+		$this->wpdb = new WP_SQLite_DB('wordpress');
 	}
 
 	public function handleQuery(string $query): MySQLServerQueryResult {
@@ -36,52 +42,59 @@ class SQLiteTranslationHandler implements MySQLQueryHandler {
 			);
 		}
 		$rows = $this->wpdb->get_results($query, ARRAY_A);
-		$columns = $this->computeColumnInfo($rows);
+		if ($this->wpdb->last_error) {
+			return new ErrorQueryResult($this->wpdb->last_error);
+		}
+		$columns = $this->computeColumnInfo();
 		return new SelectQueryResult($columns, $rows);
 	}
 
-	public function computeColumnInfo($rows) {
-		if (empty($rows)) {
-			return [];
-		}
-	
+	public function computeColumnInfo() {
 		$columns = [];
-		$firstRow = $rows[0];
-		
-		foreach ($firstRow as $key => $value) {
-			$columnType = 8;  // Default to LONGLONG
-			$columnLength = 1;
-			$decimals = 0;
-			
-			// Analyze all rows to find the maximum length and most specific type
-			foreach ($rows as $row) {
-				$currentValue = $row[$key];
-				
-				if (is_string($currentValue)) {
-					$columnType = 253;  // VARCHAR
-					$columnLength = max($columnLength, strlen($currentValue));
-				} elseif (is_numeric($currentValue)) {
-					if (is_int($currentValue) || $currentValue == (int)$currentValue) {
-						if ($columnType != 253) { // Don't override VARCHAR
-							$columnType = 3;   // LONG
-							$columnLength = 11;
-						}
-					} else {
-						if ($columnType != 253) { // Don't override VARCHAR
-							$columnType = 246; // DECIMAL
-							$columnLength = 10;
-							$decimals = 2;
-						}
-					}
-				}
+
+		$column_meta = $this->wpdb->get_dbh()->get_last_column_meta();
+
+		$types = [
+			'DECIMAL'     => MySQLProtocol::FIELD_TYPE_DECIMAL,
+			'TINY'        => MySQLProtocol::FIELD_TYPE_TINY,
+			'SHORT'       => MySQLProtocol::FIELD_TYPE_SHORT,
+			'LONG'        => MySQLProtocol::FIELD_TYPE_LONG,
+			'FLOAT'       => MySQLProtocol::FIELD_TYPE_FLOAT,
+			'DOUBLE'      => MySQLProtocol::FIELD_TYPE_DOUBLE,
+			'NULL'        => MySQLProtocol::FIELD_TYPE_NULL,
+			'TIMESTAMP'   => MySQLProtocol::FIELD_TYPE_TIMESTAMP,
+			'LONGLONG'    => MySQLProtocol::FIELD_TYPE_LONGLONG,
+			'INT24'       => MySQLProtocol::FIELD_TYPE_INT24,
+			'DATE'        => MySQLProtocol::FIELD_TYPE_DATE,
+			'TIME'        => MySQLProtocol::FIELD_TYPE_TIME,
+			'DATETIME'    => MySQLProtocol::FIELD_TYPE_DATETIME,
+			'YEAR'        => MySQLProtocol::FIELD_TYPE_YEAR,
+			'NEWDATE'     => MySQLProtocol::FIELD_TYPE_NEWDATE,
+			'VARCHAR'     => MySQLProtocol::FIELD_TYPE_VARCHAR,
+			'BIT'         => MySQLProtocol::FIELD_TYPE_BIT,
+			'NEWDECIMAL'  => MySQLProtocol::FIELD_TYPE_NEWDECIMAL,
+			'ENUM'        => MySQLProtocol::FIELD_TYPE_ENUM,
+			'SET'         => MySQLProtocol::FIELD_TYPE_SET,
+			'TINY_BLOB'   => MySQLProtocol::FIELD_TYPE_TINY_BLOB,
+			'MEDIUM_BLOB' => MySQLProtocol::FIELD_TYPE_MEDIUM_BLOB,
+			'LONG_BLOB'   => MySQLProtocol::FIELD_TYPE_LONG_BLOB,
+			'BLOB'        => MySQLProtocol::FIELD_TYPE_BLOB,
+			'VAR_STRING'  => MySQLProtocol::FIELD_TYPE_VAR_STRING,
+			'STRING'      => MySQLProtocol::FIELD_TYPE_STRING,
+			'GEOMETRY'    => MySQLProtocol::FIELD_TYPE_GEOMETRY,
+		];
+
+		foreach ($column_meta as $column) {
+			$type = $types[$column['native_type']];
+			if ( null === $type ) {
+				throw new Exception('Unknown column type: ' . $column['native_type']);
 			}
-			
 			$columns[] = [
-				'name' => $key,
-				'length' => $columnLength ?? 1,
-				'type' => $columnType,
-				'flags' => 129,
-				'decimals' => $decimals
+				'name'     => $column['name'],
+				'length'   => $column['len'],
+				'type'     => $type,
+				'flags'    => 129,
+				'decimals' => $column['precision']
 			];
 		}
 		return $columns;
