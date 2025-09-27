@@ -2,57 +2,62 @@
 
 define('WP_DEBUG', false);
 
-require_once __DIR__ . '/wpdb-polyfill.php';
-
-// A polyfill – function is called by the wpdb class.
-function apply_filters($tag, $value) {
-	return $value;
-}
-
-// A dummy polyfill – function is called by the wpdb class.
-function wp_debug_backtrace_summary( $ignore_class = null, $skip_frames = 0, $pretty = true ) {
-	return 'unknown';
-}
-
 require_once __DIR__ . '/sqlite-database-integration/version.php';
-require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-lexer.php';
-require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-query-rewriter.php';
-require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-translator.php';
-require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-token.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/parser/class-wp-parser-grammar.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/parser/class-wp-parser.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/parser/class-wp-parser-node.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/parser/class-wp-parser-token.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/mysql/class-wp-mysql-token.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/mysql/class-wp-mysql-lexer.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/mysql/class-wp-mysql-parser.php';
 require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-pdo-user-defined-functions.php';
-require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite/class-wp-sqlite-db.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-connection.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-configurator.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-driver.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-driver-exception.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-information-schema-builder.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-information-schema-exception.php';
+require_once __DIR__ . '/sqlite-database-integration/wp-includes/sqlite-ast/class-wp-sqlite-information-schema-reconstructor.php';
+
 
 class SQLiteTranslationHandler implements MySQLQueryHandler {
-	private $wpdb;
+	/** @var WP_SQLite_Driver */
+	private $sqlite_driver;
 
 	public function __construct($sqlite_database_path) {
 		define('FQDB', $sqlite_database_path);
 		define('FQDBDIR', dirname(FQDB) . '/');
-		$this->wpdb = new WP_SQLite_DB('wordpress');
+
+		$this->sqlite_driver = new WP_SQLite_Driver(
+			new WP_SQLite_Connection( array( 'path' => $sqlite_database_path ) ),
+			'wordpress'
+		);
 	}
 
 	public function handleQuery(string $query): MySQLServerQueryResult {
-		// An extremely naive check. We should be using the MySQL parser to
-		// determine this:
-		if(!str_starts_with(strtolower($query), 'select')) {
-			$this->wpdb->query($query);
-			return new OkayPacketResult(
-				$this->wpdb->rows_affected ?? 0,
-				$this->wpdb->insert_id ?? 0
-			);
+		try {
+			// An extremely naive check. We should be using the MySQL parser to
+			// determine this:
+			if(!str_starts_with(strtolower($query), 'select')) {
+				$this->sqlite_driver->query($query);
+				return new OkayPacketResult(
+					$this->sqlite_driver->get_last_return_value() ?? 0,
+					$this->sqlite_driver->get_insert_id() ?? 0
+				);
+			}
+
+			$rows    = $this->sqlite_driver->query($query, PDO::FETCH_ASSOC);
+			$columns = $this->computeColumnInfo();
+			return new SelectQueryResult($columns, $rows);
+		} catch (Throwable $e) {
+			return new ErrorQueryResult($e->getMessage());
 		}
-		$rows = $this->wpdb->get_results($query, ARRAY_A);
-		if ($this->wpdb->last_error) {
-			return new ErrorQueryResult($this->wpdb->last_error);
-		}
-		$columns = $this->computeColumnInfo();
-		return new SelectQueryResult($columns, $rows);
 	}
 
 	public function computeColumnInfo() {
 		$columns = [];
 
-		$column_meta = $this->wpdb->get_dbh()->get_last_column_meta();
+		$column_meta = $this->sqlite_driver->get_last_column_meta();
 
 		$types = [
 			'DECIMAL'     => MySQLProtocol::FIELD_TYPE_DECIMAL,
@@ -85,7 +90,7 @@ class SQLiteTranslationHandler implements MySQLQueryHandler {
 		];
 
 		foreach ($column_meta as $column) {
-			$type = $types[$column['native_type']];
+			$type = $types[$column['native_type']] ?? null;
 			if ( null === $type ) {
 				throw new Exception('Unknown column type: ' . $column['native_type']);
 			}
