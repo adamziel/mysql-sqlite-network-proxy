@@ -13,7 +13,7 @@ define('WP_SQLITE_AST_DRIVER', true);
 
 $server = new MySQLSocketServer(
 	new SQLiteTranslationHandler(__DIR__ . '/database/test.db'),
-	['port' => 3316]
+	['port' => 3306]
 );
 $server->start();
 

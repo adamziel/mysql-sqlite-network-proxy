@@ -323,7 +323,11 @@ class MySQLProtocol {
         // 4. Row data packets (each row is a series of length-encoded values)
         foreach ($result->rows as $row) {
             $rowPayload = "";
-            foreach ($row as $val) {
+            // Iterate through columns in the defined order to match column definitions
+            foreach ($result->columns as $col) {
+                $columnName = $col['name'];
+                $val = $row->{$columnName} ?? null;
+                
                 if ($val === null) {
                     // NULL is represented by 0xfb (NULL_VALUE)
                     $rowPayload .= "\xfb";
