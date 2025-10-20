@@ -36,19 +36,15 @@ class SQLiteTranslationHandler implements MySQLQueryHandler {
 
 	public function handleQuery(string $query): MySQLServerQueryResult {
 		try {
-			// An extremely naive check. We should be using the MySQL parser to
-			// determine this:
-			if(!str_starts_with(strtolower($query), 'select')) {
-				$this->sqlite_driver->query($query);
-				return new OkayPacketResult(
-					$this->sqlite_driver->get_last_return_value() ?? 0,
-					$this->sqlite_driver->get_insert_id() ?? 0
-				);
+			$rows = $this->sqlite_driver->query($query);
+			if ( $this->sqlite_driver->get_last_column_count() > 0 ) {
+				$columns = $this->computeColumnInfo();
+				return new SelectQueryResult($columns, $rows);
 			}
-
-			$rows    = $this->sqlite_driver->query($query, PDO::FETCH_ASSOC);
-			$columns = $this->computeColumnInfo();
-			return new SelectQueryResult($columns, $rows);
+			return new OkayPacketResult(
+				$this->sqlite_driver->get_last_return_value() ?? 0,
+				$this->sqlite_driver->get_insert_id() ?? 0
+			);
 		} catch (Throwable $e) {
 			return new ErrorQueryResult($e->getMessage());
 		}
